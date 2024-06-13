@@ -39,6 +39,37 @@ Something like::
 .. note::
     We will use this example as a reference for every example in this document.
 
+Another alternative exists if your module defines a class, and a method
+(or attribute) of an instance of that class returns an `ArgumentParser`::
+
+    class MyCLIWrapper:
+        ...
+
+        def get_parser(self):
+            parser = argparse.ArgumentParser()
+            parser.add_argument('foo', default=False, help='foo help')
+            parser.add_argument('bar', default=False)
+
+            subparsers = parser.add_subparsers()
+
+            subparser = subparsers.add_parser('install', help='install help')
+            subparser.add_argument('ref', type=str, help='foo1 help')
+            subparser.add_argument('--upgrade', action='store_true', default=False, help='foo2 help')
+
+            return parser
+
+In this case you can use::
+
+    .. argparse::
+       :module: my.module
+       :class: MyCLIWrapper
+       :func: get_parser
+       :prog: fancytool
+
+.. note::
+    If `MyCLIWrapper` is an `ArgumentParser` subclass,
+    `func` is not mandatory and not used.
+
 To document a file that is not part of a module, use :filename::
 
     .. argparse::

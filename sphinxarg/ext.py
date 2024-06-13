@@ -1,3 +1,4 @@
+import inspect
 import os
 import shutil
 import sys
@@ -273,6 +274,7 @@ class ArgParseDirective(Directive):
         markdown=flag,
         markdownhelp=flag,
     )
+    option_spec['class'] = unchanged
 
     def _construct_manpage_specific_structure(self, parser_info):
         """
@@ -451,13 +453,28 @@ class ArgParseDirective(Directive):
         raise FileNotFoundError(self.options['filename'])
 
     def run(self):
-        if 'module' in self.options and 'func' in self.options:
+        if 'module' in self.options and 'class' in self.options:
+            module_name = self.options['module']
+            attr_name = self.options['class']
+            class_attr_name = None
+            if 'func' in self.options:
+                class_attr_name = self.options['func']
+        elif 'module' in self.options and 'func' in self.options:
             module_name = self.options['module']
             attr_name = self.options['func']
         elif 'ref' in self.options:
             _parts = self.options['ref'].split('.')
             module_name = '.'.join(_parts[0:-1])
             attr_name = _parts[-1]
+        elif 'filename' in self.options and 'class' in self.options:
+            mod = {}
+            f = self._open_filename()
+            code = compile(f.read(), self.options['filename'], 'exec')
+            exec(code, mod)
+            attr_name = self.options['class']
+            func = mod[attr_name]
+            if 'func' in self.options:
+                class_attr_name = self.options['func']
         elif 'filename' in self.options and 'func' in self.options:
             mod = {}
             f = self._open_filename()
@@ -476,8 +493,18 @@ class ArgParseDirective(Directive):
                 raise self.error(f'Failed to import "{attr_name}" from "{module_name}".\n{sys.exc_info()[1]}')
 
             if not hasattr(mod, attr_name):
-                raise self.error(('Module "%s" has no attribute "%s"\nIncorrect argparse :module: or :func: values?') % (module_name, attr_name))
+                raise self.error(('Module "%s" has no attribute "%s"\nIncorrect argparse :module:, '
+                                  ':func:, or :class: values?') % (module_name, attr_name))
             func = getattr(mod, attr_name)
+        if 'class' in self.options and not inspect.isclass(func):
+            raise self.error(':class: %s is not a class' % attr_name)
+        if 'class' in self.options:
+            func = func()  # An instance of the class
+            if not isinstance(func, ArgumentParser):
+                if class_attr_name is None:
+                    raise self.error(':func: is mandatory when :class: is '
+                                     'not an ArgumentParser subclass')
+                func = getattr(func, class_attr_name)
 
         if isinstance(func, ArgumentParser):
             parser = func
