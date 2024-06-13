@@ -1,3 +1,4 @@
+import inspect
 import os
 import shutil
 import sys
@@ -83,6 +84,31 @@ def render_list(l, markdown_help, settings=None):
         return all_children
 
 
+def capitalize_help(help_txt):
+    """Return a version of help_txt with the first word capitalized."""
+    if not help_txt:
+        return help_txt
+
+    first, *rest = help_txt.split(maxsplit=1)
+    if not first.isupper():
+        # Do not change "UPPERCASE" to "Uppercase"
+        first = first.capitalize()
+    capitalized = first
+    if rest:
+        capitalized += ' ' + ' '.join(rest)
+    if not capitalized.endswith('.'):
+        capitalized += '.'
+    return capitalized
+
+
+def is_suppressed(item):
+    """Return whether item should not be printed."""
+    if item is None:
+        return True
+    item = str(item).replace('"', '').replace("'", '')
+    return item == '==SUPPRESS=='
+
+
 def print_action_groups(data, nested_content, markdown_help=False, settings=None):
     """
     Process all 'action groups', which are also include 'Options' and 'Required
@@ -137,11 +163,8 @@ def print_action_groups(data, nested_content, markdown_help=False, settings=None
                 if 'choices' in entry:
                     arg.append(f"Possible choices: {', '.join(str(c) for c in entry['choices'])}\n")
                 if 'help' in entry:
-                    arg.append(entry['help'])
-                if entry['default'] is not None and entry['default'] not in [
-                    '"==SUPPRESS=="',
-                    '==SUPPRESS==',
-                ]:
+                    arg.append(capitalize_help(entry['help']))
+                if not is_suppressed(entry['default']):
                     # Put the default value in a literal block - but escape backticks already in the string
                     default_str = str(entry['default']).replace('`', r'\`')
                     arg.append(f"Default: ``{default_str}``")
@@ -195,7 +218,7 @@ def print_subcommands(data, nested_content, markdown_help=False, settings=None):
             if 'description' in child and child['description']:
                 desc = [child['description']]
             elif child['help']:
-                desc = [child['help']]
+                desc = [capitalize_help(child['help'])]
             else:
                 desc = ['Undocumented']
 
@@ -272,7 +295,10 @@ class ArgParseDirective(Directive):
         nodescription=unchanged,
         markdown=flag,
         markdownhelp=flag,
+        usagesection=flag,
+        showusagemain=unchanged,
     )
+    option_spec['class'] = unchanged
 
     def _construct_manpage_specific_structure(self, parser_info):
         """
@@ -365,7 +391,9 @@ class ArgParseDirective(Directive):
         for arg in parser_info['args']:
             arg_items = []
             if arg['help']:
-                arg_items.append(nodes.paragraph(text=arg['help']))
+                help_txt = arg['help']
+                help_txt = capitalize_help(help_txt)
+                arg_items.append(nodes.paragraph(text=help_txt))
             elif 'choices' not in arg:
                 arg_items.append(nodes.paragraph(text='Undocumented'))
             if 'choices' in arg:
@@ -394,7 +422,7 @@ class ArgParseDirective(Directive):
                     option_declaration += nodes.option_argument('', text='=' + str(opt['default']))
                 names.append(nodes.option('', *option_declaration))
             if opt['help']:
-                opt_items.append(nodes.paragraph(text=opt['help']))
+                opt_items.append(nodes.paragraph(text=capitalize_help(opt['help'])))
             elif 'choices' not in opt:
                 opt_items.append(nodes.paragraph(text='Undocumented'))
             if 'choices' in opt:
@@ -414,7 +442,7 @@ class ArgParseDirective(Directive):
         for subcmd in parser_info['children']:
             subcmd_items = []
             if subcmd['help']:
-                subcmd_items.append(nodes.paragraph(text=subcmd['help']))
+                subcmd_items.append(nodes.paragraph(text=capitalize_help(subcmd['help'])))
             else:
                 subcmd_items.append(nodes.paragraph(text='Undocumented'))
             items.append(
@@ -451,13 +479,28 @@ class ArgParseDirective(Directive):
         raise FileNotFoundError(self.options['filename'])
 
     def run(self):
-        if 'module' in self.options and 'func' in self.options:
+        if 'module' in self.options and 'class' in self.options:
+            module_name = self.options['module']
+            attr_name = self.options['class']
+            class_attr_name = None
+            if 'func' in self.options:
+                class_attr_name = self.options['func']
+        elif 'module' in self.options and 'func' in self.options:
             module_name = self.options['module']
             attr_name = self.options['func']
         elif 'ref' in self.options:
             _parts = self.options['ref'].split('.')
             module_name = '.'.join(_parts[0:-1])
             attr_name = _parts[-1]
+        elif 'filename' in self.options and 'class' in self.options:
+            mod = {}
+            f = self._open_filename()
+            code = compile(f.read(), self.options['filename'], 'exec')
+            exec(code, mod)
+            attr_name = self.options['class']
+            func = mod[attr_name]
+            if 'func' in self.options:
+                class_attr_name = self.options['func']
         elif 'filename' in self.options and 'func' in self.options:
             mod = {}
             f = self._open_filename()
@@ -476,8 +519,18 @@ class ArgParseDirective(Directive):
                 raise self.error(f'Failed to import "{attr_name}" from "{module_name}".\n{sys.exc_info()[1]}')
 
             if not hasattr(mod, attr_name):
-                raise self.error(('Module "%s" has no attribute "%s"\nIncorrect argparse :module: or :func: values?') % (module_name, attr_name))
+                raise self.error(('Module "%s" has no attribute "%s"\nIncorrect argparse :module:, '
+                                  ':func:, or :class: values?') % (module_name, attr_name))
             func = getattr(mod, attr_name)
+        if 'class' in self.options and not inspect.isclass(func):
+            raise self.error(':class: %s is not a class' % attr_name)
+        if 'class' in self.options:
+            func = func()  # An instance of the class
+            if not isinstance(func, ArgumentParser):
+                if class_attr_name is None:
+                    raise self.error(':func: is mandatory when :class: is '
+                                     'not an ArgumentParser subclass')
+                func = getattr(func, class_attr_name)
 
         if isinstance(func, ArgumentParser):
             parser = func
@@ -523,7 +576,26 @@ class ArgParseDirective(Directive):
                 items.extend(render_list([result['description']], True))
             else:
                 items.append(self._nested_parse_paragraph(result['description']))
-        items.append(nodes.literal_block(text=result['usage']))
+        if 'usagesection' in self.options:
+            # Dedicated section for "Usage"
+            items.append(nodes.section(
+                '',
+                nodes.title(text='Usage'),
+                nodes.literal_block(text=result['bare_usage']),
+                ids=['usage-section'],
+                ))
+        else:
+            # Just the standard Argparse help
+            items.append(nodes.literal_block(text=result['usage']))
+        if self.options['showusagemain']:
+            as_python_main = self.options['showusagemain'].split(',')
+            if as_python_main:
+                _literal_txt = '\n'.join([
+                    'python -m ' + _alt.strip() + ' ...'
+                    for _alt in as_python_main
+                    ])
+                items.append(nodes.paragraph(text='or'))
+                items.append(nodes.literal_block(text=_literal_txt))
         items.extend(
             print_action_groups(
                 result,
