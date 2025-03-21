@@ -235,7 +235,7 @@ def print_subcommands(data, nested_content, markdown_help=False, settings=None):
 
             for element in render_list(desc, markdown_help):
                 sec += element
-            sec += nodes.literal_block(text=child['bare_usage'])
+            sec += nodes.literal_block(text=with_long_help_arg(child))
             for x in print_action_groups(
                 child, nested_content + subcontent, markdown_help, settings=settings
             ):
@@ -281,6 +281,12 @@ def ensure_unique_ids(items):
                 n['ids'] = ids
 
 
+def with_long_help_arg(item):
+    """Replace [-h] with [--help] in a usage message."""
+    usage_str = item['bare_usage']
+    return usage_str.replace('[-h]', '[--help]', 1)
+
+
 class ArgParseDirective(SphinxDirective):
     has_content = True
     option_spec = {
@@ -317,7 +323,7 @@ class ArgParseDirective(SphinxDirective):
         synopsis_section = nodes.section(
             '',
             nodes.title(text='Synopsis'),
-            nodes.literal_block(text=parser_info['bare_usage']),
+            nodes.literal_block(text=with_long_help_arg(parser_info)),
             ids=['synopsis-section'],
         )
         items.append(synopsis_section)
@@ -456,7 +462,9 @@ class ArgParseDirective(SphinxDirective):
             items.append(
                 nodes.definition_list_item(
                     '',
-                    nodes.term('', '', nodes.strong(text=subcmd['bare_usage'])),
+                    nodes.term('',
+                               '',
+                               nodes.strong(text=with_long_help_arg(subcmd))),
                     nodes.definition('', *subcmd_items),
                 )
             )
@@ -570,7 +578,7 @@ class ArgParseDirective(SphinxDirective):
                 items.extend(render_list([result['description']], True))
             else:
                 items.append(self._nested_parse_paragraph(result['description']))
-        items.append(nodes.literal_block(text=result['usage']))
+        items.append(nodes.literal_block(text=with_long_help_arg(result)))
         items.extend(
             print_action_groups(
                 result,
