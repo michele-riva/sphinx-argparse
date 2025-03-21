@@ -253,7 +253,7 @@ def print_subcommands(data, nested_content, markdown_help=False, settings=None):
 
             for element in render_list(desc, markdown_help):
                 sec += element
-            sec += nodes.literal_block(text=child['bare_usage'])
+            sec += nodes.literal_block(text=with_long_help_arg(child))
             for x in print_action_groups(
                 child, nested_content + subcontent, markdown_help, settings=settings
             ):
@@ -299,6 +299,12 @@ def ensure_unique_ids(items):
                 n['ids'] = ids
 
 
+def with_long_help_arg(info, key='bare_usage'):
+    """Replace [-h] with [--help] in a usage message."""
+    usage_str = info[key]
+    return usage_str.replace('[-h]', '[--help]', 1)
+
+
 class ArgParseDirective(SphinxDirective):
     has_content = True
     option_spec = {
@@ -338,7 +344,7 @@ class ArgParseDirective(SphinxDirective):
         synopsis_section = nodes.section(
             '',
             nodes.title(text='Synopsis'),
-            nodes.literal_block(text=parser_info['bare_usage']),
+            nodes.literal_block(text=with_long_help_arg(parser_info)),
             ids=['synopsis-section'],
         )
         items.append(synopsis_section)
@@ -479,7 +485,9 @@ class ArgParseDirective(SphinxDirective):
             items.append(
                 nodes.definition_list_item(
                     '',
-                    nodes.term('', '', nodes.strong(text=subcmd['bare_usage'])),
+                    nodes.term('',
+                               '',
+                               nodes.strong(text=with_long_help_arg(subcmd))),
                     nodes.definition('', *subcmd_items),
                 )
             )
@@ -622,12 +630,14 @@ class ArgParseDirective(SphinxDirective):
             items.append(nodes.section(
                 '',
                 nodes.title(text='Usage'),
-                nodes.literal_block(text=result['bare_usage']),
+                nodes.literal_block(text=with_long_help_arg(result)),
                 ids=['usage-section'],
                 ))
         else:
             # Just the standard Argparse help
-            items.append(nodes.literal_block(text=result['usage']))
+            items.append(
+                nodes.literal_block(text=with_long_help_arg(result, 'usage'))
+                )
         if self.options['showusagemain']:
             as_python_main = self.options['showusagemain'].split(',')
             if as_python_main:
